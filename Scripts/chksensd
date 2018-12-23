@@ -1,0 +1,16 @@
+#!/bin/bash
+
+while true ; do
+
+    pgrep -x sensd
+    if [ "$?" -ne 0 ]; then
+        echo "lost sensd"
+        /root/Scripts/sensd >/dev/null 2>&1 &
+        DATE=$(date +"%Y-%m-%d %H:%M")
+        echo "$DATE restarting sensd" >> /var/log/sensd.log
+    else
+        echo "found sensd"
+    fi
+
+    sleep 60
+done
