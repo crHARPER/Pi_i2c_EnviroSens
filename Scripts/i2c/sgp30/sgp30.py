@@ -6,6 +6,9 @@
 # NOV 27, 2018 Revision to AH compensation
 # DEC 03, 2018 Added Serial ID and now writing Version to file system
 #
+# Revised:
+# OCT 18, 2021
+#
 # Sensirion SGP30 VOC sensor
 # running on a Raspberry Pi
 # 
@@ -15,7 +18,7 @@
 #
 import os
 import time
-from smbus import SMBus
+from smbus2 import SMBus, i2c_msg
 
 I2CBUS = 1
 
@@ -49,6 +52,7 @@ SGP30_T_MAX_FLOAT = 5.0
 #
 CRC_HTU = 0x00      # Instrumant Specialties HTU21D RH sensor
 CRC_SGP = 0xff      # Senserion VOC sensor
+
 #
 #-----------------------------------------------------------------------------
 # SGP30 Sensirion VOC Sensor
@@ -96,15 +100,23 @@ class SGP30:
         #-----------------------------------------------------------------------------
         # Upon power-up, initilized the SGP30 sensor
         #-----------------------------------------------------------------------------
-        bus = SMBus(I2CBUS)
-        bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_INIT )
-        time.sleep(0.01)
-        bus.close()
         
-        # Init envronmental compensation registers
-        ah = 10.28 # equal to T:23c & RH: 50% 
-        self.set_comp( ah )
-        # will implement periodically in loop
+        try:
+            
+            bus = SMBus(I2CBUS)
+            bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_INIT )
+            time.sleep(0.01)
+            bus.close()
+        
+            # Init envronmental compensation registers
+            ah = 10.28 # equal to T:23c & RH: 50% 
+            self.set_comp( ah )
+            # will implement periodically in loop
+            
+        except:
+            bus.close()
+            print "sgp30.init() failed"
+        
         time.sleep(0.01)
         
 
@@ -136,44 +148,50 @@ class SGP30:
     #-----------------------------------------------------------------------------
     # usually called by comp_task() and __init__()
     def set_comp( self, ah ):
-
-        msg = [ SGP30_SET_AH ] # start with command LSB
-
-        # we don't want to completely turn off compensation when humididty is very low
-        # per datasheet page 8/15 minimum value is 1/256 g/M^3
-        #if ah < 0.1:
-        #    ah = 0.01
         
-        # Enviro's very low winter time AH values may be causing large baseline offsets
-        # testing limiting minimum AH value to 1g/M^3
-        if ah < 1.0: 
-            ah = 1.0
+        try:
 
-        ah_i = int( ah // 1) 	        # integer byte
-        ah_i &= 0xff
-        ah_d = int( (ah % 1) * 256.0 ) # decimal byte
-        ah_d &= 0xff   
+            msg = [ SGP30_SET_AH ] # start with command LSB
 
-        ah_comp = [ ah_i, ah_d ]       # in SGP30 format
-        ah_crc = self.crc8( ah_comp )
-
-        # addend crc byte
-        ah_comp.append( ah_crc )
-        # add AH data list to message list
-        msg.extend(ah_comp)
-
-        print "sgp30.set_comp(): set AH: %.1f" % ( ah )
-        print "sgp30.set_comp(): AH regs. 0x%02x 0x%02x" % ( ah_i, ah_d )
-
-        bus = SMBus(I2CBUS)
-        resp = bus.write_i2c_block_data( self.I2Caddr, SGP30_MSB, msg )
-        bus.close()
-        time.sleep(0.01)
+            # we don't want to completely turn off compensation when humididty is very low
+            # per datasheet page 8/15 minimum value is 1/256 g/M^3
+            #if ah < 0.1:
+            #    ah = 0.01
         
-        # log AH value
-        f = open(self.FptrAH,"w")
-        f.write("%3.1f" % ah)
-        f.close()
+            # Enviro's very low winter time AH values may be causing large baseline offsets
+            # testing limiting minimum AH value to 1g/M^3
+            if ah < 1.0: 
+                ah = 1.0
+
+            ah_i = int( ah // 1) 	        # integer byte
+            ah_i &= 0xff
+            ah_d = int( (ah % 1) * 256.0 ) # decimal byte
+            ah_d &= 0xff   
+
+            ah_comp = [ ah_i, ah_d ]       # in SGP30 format
+            ah_crc = self.crc8( ah_comp )
+
+            # addend crc byte
+            ah_comp.append( ah_crc )
+            # add AH data list to message list
+            msg.extend(ah_comp)
+
+            print "sgp30.set_comp(): set AH: %.1f" % ( ah )
+            print "sgp30.set_comp(): AH regs. 0x%02x 0x%02x" % ( ah_i, ah_d )
+
+            bus = SMBus(I2CBUS)
+            resp = bus.write_i2c_block_data( self.I2Caddr, SGP30_MSB, msg )
+            bus.close()
+            time.sleep(0.01)
+        
+            # log AH value
+            f = open(self.FptrAH,"w")
+            f.write("%3.1f" % ah)
+            f.close()
+        
+        except:
+            bus.close()
+            print "sgp30.set_comp() failed"
         
         
     #-----------------------------------------------------------------------------
@@ -181,6 +199,7 @@ class SGP30:
     #----------------------------------------------------------------------------- 
     # run task once a minute
     def comp_task(self):
+        
         # Try to read the externally expected temperature and humidity files
         try:
             file = open( self.FptrHTU21D_AH, "r")
@@ -194,7 +213,6 @@ class SGP30:
                 print "sgp30.comp_task(): minute AH: %3.1f" % ( ah )
 
                 if self.comp_minute == 0:
-
                     # calculate averages and set CCS811 compensation
                     avg_ah  = 0
                     for i in range(SGP30_T_MAX):
@@ -203,7 +221,7 @@ class SGP30:
                     
                     self.set_comp( avg_ah )
                     self.comp_minute = SGP30_T_MAX
-                    
+
         except:
             print "sgp30.comp_task(): can't read AH file"    
 
@@ -212,48 +230,61 @@ class SGP30:
     # Get internal auto calibration and write to file system 
     #-----------------------------------------------------------------------------        
     def get_baseline(self):
-        # eCO2 baseline word first + crc
-        # tVOC baseline word second + crc       
-        # these two lists need to be in reverse order for setting baseline
-        bus = SMBus(I2CBUS)
-        bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_GET_BASE )
-        time.sleep(0.02)
-        resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
-        bus.close()
         
-        # Because there are two set of baselines we will just
-        # write them directly to the file-system instead of
-        # looking for changes
+        try:
+            # eCO2 baseline word first + crc
+            # tVOC baseline word second + crc       
+            # these two lists need to be in reverse order for setting baseline
+            bus = SMBus(I2CBUS)
+            bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_GET_BASE )
+            time.sleep(0.02)
+            
+            # for some reason an extra null byte is needed to get data
+            resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
+            # below doesn't work
+            #read = i2c_msg.read( selfI2Caddr, 6 )
+            #bus.i2c_rdwr(read)
+            #resp = list(read)
+            bus.close()
         
-        baseline_co2 = [ resp[0], resp[1], resp[2] ]
-        baseline_voc = [ resp[3], resp[4], resp[5] ]
+            # Because there are two set of baselines we will just
+            # write them directly to the file-system instead of
+            # looking for changes
+            baseline_co2 = [ resp[0], resp[1], resp[2] ]
+            baseline_voc = [ resp[3], resp[4], resp[5] ]
         
-        if ( self.crc8( baseline_co2 ) == 0 ):
-            # comma delimited output
-            #msg = str(baseline_co2).strip('[]')
-            bl = ( resp[0] << 8 ) | resp[1]
-            f = open(self.FptrBaseC,"w")
-            f.write("%d" % bl)
-            f.close()
+            if ( self.crc8( baseline_co2 ) == 0 ):
+                # comma delimited output
+                #msg = str(baseline_co2).strip('[]')
+                bl = ( resp[0] << 8 ) | resp[1]
+                f = open(self.FptrBaseC,"w")
+                f.write("%d" % bl)
+                f.close()
             
-            print "sgp30.get_baseline() co2: 0x%04x" % bl
+                print "sgp30.get_baseline() co2: 0x%04x" % bl
             
-        if ( self.crc8( baseline_voc ) == 0 ):
-            # comma delimited output
-            #msg = str(baseline_voc).strip('[]')
-            bl = ( resp[3] << 8 ) | resp[4]
-            f = open(self.FptrBaseV,"w")
-            f.write("%d" % bl)
-            f.close()
+            if ( self.crc8( baseline_voc ) == 0 ):
+                # comma delimited output
+                #msg = str(baseline_voc).strip('[]')
+                bl = ( resp[3] << 8 ) | resp[4]
+                f = open(self.FptrBaseV,"w")
+                f.write("%d" % bl)
+                f.close()
             
-            print "sgp30.get_baseline() voc: 0x%04x" % bl
+                print "sgp30.get_baseline() voc: 0x%04x" % bl
             
-    
+        except:
+            bus.close()
+            print "sgp30.get_baseline() failed"
+            
+            
     #-----------------------------------------------------------------------------
     # On a restart, can set to previous baselines to reduce stabilization time
     #----------------------------------------------------------------------------- 
     # !!This Method Has Not Been Verified!!     
     def set_baseline( self, baseline_voc, baseline_co2 ):
+        
+        
         # tVOC baseline word first + crc
         # eCO2 baseline word second + crc
         baseline = [0x00] * 2
@@ -274,35 +305,50 @@ class SGP30:
         msg.extend(baseline)
         msg.append( self.crc8(baseline) )
 
-        print "sgp30.set_baseline() voc baseline: %02x %02x crc: %02x" % ( msg[1], msg[2], msg[3] )
-        print "sgp30.set_baseline() co2 baseline: %02x %02x crc: %02x" % ( msg[4], msg[5], msg[6] )
+        print "sgp30.set_baseline() voc: %02x %02x crc: %02x" % ( msg[1], msg[2], msg[3] )
+        print "sgp30.set_baseline() co2: %02x %02x crc: %02x" % ( msg[4], msg[5], msg[6] )
         
-        bus = SMBus(I2CBUS)
-        resp = bus.write_i2c_block_data( self.I2Caddr, SGP30_MSB, msg )
-        bus.close()
-        time.sleep(0.01)
+        try:    
+            
+            bus = SMBus(I2CBUS)
+            resp = bus.write_i2c_block_data( self.I2Caddr, SGP30_MSB, msg )
+            bus.close()
+            time.sleep(0.01)
 
+        except:
+            bus.close()
+            print "sgp30.set_baseline() failed"
 
     #-----------------------------------------------------------------------------
     # Get feature set & version 
     #-----------------------------------------------------------------------------        
     def get_version(self):
         
-        bus = SMBus(I2CBUS)
-        bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_GET_VERSION )
-        time.sleep(0.01)
-        resp = bus.read_i2c_block_data( self.I2Caddr, 0, 3 )
-        bus.close()
+        info = 99999
         
-        if ( self.crc8( resp ) == 0 ):
-            print "sgp30.get_version() Feature Set Type: 0x%02x Version: 0x%02x" % ( resp[0], resp[1] )
+        try:
+            bus = SMBus(I2CBUS)
+            bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_GET_VERSION )
+            time.sleep(0.01)
+            #resp = bus.read_i2c_block_data( self.I2Caddr, 0, 3 )
+            read = i2c_msg.read( self.I2Caddr, 3 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
+            bus.close()
+        
+            if ( self.crc8( resp ) == 0 ):
+                print "sgp30.get_version() Feature Set Type: 0x%02x Version: 0x%02x" % ( resp[0], resp[1] )
             
-            info = (resp[0] << 8) | resp[1]
+                info = (resp[0] << 8) | resp[1]
                 
-            #log Feature & Version Info
-            f = open(self.FptrVer,"w")
-            f.write("%d" % info)
-            f.close()
+                #log Feature & Version Info
+                f = open(self.FptrVer,"w")
+                f.write("%d" % info)
+                f.close()
+        
+        except:
+            bus.close()
+            print "spg30.get_version() failed"
         
         return info
     
@@ -312,44 +358,55 @@ class SGP30:
     #-----------------------------------------------------------------------------
     def get_sid(self):
         
-        info = [ 0xffff ] * 3
-        test = 0
+        sid = 99999
+        
+        try:
+            
+            info = [ 0xffff ] * 3
+            test = 0
     
-        bus = SMBus(I2CBUS)
-        bus.write_byte_data( self.I2Caddr, SGP30_SID_MSB, SGP30_SID_LSB )
-        time.sleep(0.01)
+            bus = SMBus(I2CBUS)
+            bus.write_byte_data( self.I2Caddr, SGP30_SID_MSB, SGP30_SID_LSB )
+            time.sleep(0.01)
         
-        resp = bus.read_i2c_block_data( self.I2Caddr, 0, 9 )
-        bus.close()
+            #resp = bus.read_i2c_block_data( self.I2Caddr, 0, 9 )
+            read = i2c_msg.read( self.I2Caddr, 9 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
+            bus.close()
 
-        sid_1 = [ resp[0], resp[1], resp[2] ]
-        sid_2 = [ resp[3], resp[4], resp[5] ]
-        sid_3 = [ resp[6], resp[7], resp[8] ]
+            sid_1 = [ resp[0], resp[1], resp[2] ]
+            sid_2 = [ resp[3], resp[4], resp[5] ]
+            sid_3 = [ resp[6], resp[7], resp[8] ]
 
-        if ( self.crc8( sid_1 ) == 0 ):
-            info[0] = (sid_1[0] << 8 ) | sid_1[1]
-            test += 1
+            if ( self.crc8( sid_1 ) == 0 ):
+                info[0] = (sid_1[0] << 8 ) | sid_1[1]
+                test += 1
             
-        if ( self.crc8( sid_2 ) == 0 ):
-            info[1] = (sid_2[0] << 8) | sid_2[1]
-            test += 1            
+            if ( self.crc8( sid_2 ) == 0 ):
+                info[1] = (sid_2[0] << 8) | sid_2[1]
+                test += 1            
 
-        if ( self.crc8( sid_3 ) == 0 ):
-            info[2] = (sid_3[0] << 8) | sid_3[1]   
-            test += 1
+            if ( self.crc8( sid_3 ) == 0 ):
+                info[2] = (sid_3[0] << 8) | sid_3[1]   
+                test += 1
         
-        if test == 3:
-            sid = (info[0] << 32) | (info[1] << 16) | info[2]
-            print "sgp30.get_sid(): 0x%012x" % ( sid )  
+            if test == 3:
+                sid = (info[0] << 32) | (info[1] << 16) | info[2]
+                print "sgp30.get_sid(): 0x%012x" % ( sid )  
             
-            #log Serial ID
-            f = open(self.FptrSID,"w")
-            f.write("%d" % sid)
-            f.close()
-        else:
-            print "sgp30.get_sid(): failed"
+                #log Serial ID
+                f = open(self.FptrSID,"w")
+                f.write("%d" % sid)
+                f.close()
+            else:
+                print "sgp30.get_sid(): CRC error"
+                
+        except:
+            bus.close()
+            print "sgp30.get_sid() failed"
         
-        return info
+        return sid
             
             
     #-----------------------------------------------------------------------------
@@ -362,62 +419,69 @@ class SGP30:
         et = 99999 # Ethanol
         test = 0
         
-        bus = SMBus(I2CBUS)
-        bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_MEASURE_RAW )
-        time.sleep(0.03)
-        resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
-        bus.close()
+        try:
         
-        # raw sensor values
-        # bytes 0-2 are H2 + CRC8
-        # bytes 3-5 are Ethanol + CRC8
-        temp = [ resp[0], resp[1], resp[2] ]
-        if ( self.crc8( temp ) == 0 ):
-            h2 = (resp[0] << 8) | resp[1]
-            # maintain 1 minute moving average buffer
-            self.h2_buff[ self.raw_ptr ] = h2
-            test += 1
-                
-        temp = [ resp[3], resp[4], resp[5] ]
-        if ( self.crc8( temp ) == 0 ):
-            et = (resp[3] << 8) | resp[4]
-            # maintain 1 minute moving average buffer
-            self.et_buff[ self.raw_ptr ] = et
-            test += 1
-                
-        # every 20 seconds write to file system
-        if (self.raw_ptr % 20 == 0 ):             
-            
-            # calculate current average voc value
-            # 60 samples per minute
-            avg_h2 = 0
-            avg_et = 0
-            for i in range( SGP30_MAX ):
-                avg_h2 += self.h2_buff[i]
-                avg_et += self.et_buff[i]
-            avg_h2 /= SGP30_MAX_FLOAT
-            avg_et /= SGP30_MAX_FLOAT
-            avg_h2 = int(round( avg_h2 ))
-            avg_et = int(round( avg_et ))
-            
-            print "sgp30.raw() h2 avg: %d ethanol avg: %d" % ( avg_h2, avg_et )
-                
-            f = open(self.FptrH2,"w")
-            f.write("%d" % avg_h2)
-            f.close()
-                
-            f = open(self.FptrET,"w")
-            f.write("%d" % avg_et)
-            f.close()
-            
-        # only if all data is valid, do we increment the pointer            
-        if test == 2:
-            self.raw_ptr += 1
-            if self.raw_ptr >= SGP30_MAX:
-                self.raw_ptr = 0   
+            bus = SMBus(I2CBUS)
+            bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_MEASURE_RAW )
+            time.sleep(0.03)
+            read = i2c_msg.read( self.I2Caddr, 6 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
+            bus.close()
         
+            # raw sensor values
+            # bytes 0-2 are H2 + CRC8
+            # bytes 3-5 are Ethanol + CRC8
+            temp = [ resp[0], resp[1], resp[2] ]
+            if ( self.crc8( temp ) == 0 ):
+                h2 = (resp[0] << 8) | resp[1]
+                # maintain 1 minute moving average buffer
+                self.h2_buff[ self.raw_ptr ] = h2
+                test += 1
+                
+            temp = [ resp[3], resp[4], resp[5] ]
+            if ( self.crc8( temp ) == 0 ):
+                et = (resp[3] << 8) | resp[4]
+                # maintain 1 minute moving average buffer
+                self.et_buff[ self.raw_ptr ] = et
+                test += 1
+                
+            # every 20 seconds write to file system
+            if (self.raw_ptr % 20 == 0 ):             
             
-        # returning latest value, not average
+                # calculate current average voc value
+                # 60 samples per minute
+                avg_h2 = 0
+                avg_et = 0
+                for i in range( SGP30_MAX ):
+                    avg_h2 += self.h2_buff[i]
+                    avg_et += self.et_buff[i]
+                avg_h2 /= SGP30_MAX_FLOAT
+                avg_et /= SGP30_MAX_FLOAT
+                avg_h2 = int(round( avg_h2 ))
+                avg_et = int(round( avg_et ))
+            
+                print "sgp30.raw() h2 avg: %d ethanol avg: %d" % ( avg_h2, avg_et )
+                
+                f = open(self.FptrH2,"w")
+                f.write("%d" % avg_h2)
+                f.close()
+                
+                f = open(self.FptrET,"w")
+                f.write("%d" % avg_et)
+                f.close()
+            
+            # only if all data is valid, do we increment the pointer            
+            if test == 2:
+                self.raw_ptr += 1
+                if self.raw_ptr >= SGP30_MAX:
+                    self.raw_ptr = 0   
+        
+        except:
+            bus.close()
+            print "sgp30.get_raw() failed"
+        
+        # returning latest values, not averages
         return [ h2, et ]
         
         
@@ -433,7 +497,11 @@ class SGP30:
             bus = SMBus(I2CBUS)
             bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_MEASURE )
             time.sleep(0.02)
-            resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
+            #resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
+            read = i2c_msg.read( self.I2Caddr, 6 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
+
             bus.close()
             # Only care about tVOC since eCO2 is just that
             # bytes 0-2 are eCO2 + CRC8
@@ -463,11 +531,15 @@ class SGP30:
                 
                 self.voc_ptr += 1
                 if self.voc_ptr >= SGP30_MAX:
-                    self.voc_ptr = 0   
-                    
-            # returning latest value, not average
-            return t_voc
+                    self.voc_ptr = 0
             
         except:
-            print "sgp30.task() error"
-            return 99999
+            bus.close()
+            print "sgp30.task() failed"
+        
+        # returning latest value, not average
+        return t_voc
+            
+            
+    #-----------------------------------------------------------------------------
+    
