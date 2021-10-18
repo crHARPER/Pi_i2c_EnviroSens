@@ -3,17 +3,20 @@
 # chris@crHARPER.com
 # JAN 26, 2018
 #
+# Revised:
+# OCT 18, 2021
+#
 # sensd
 # Raspberry Pi
 #
-#-----------------------------------------------------------------------------
 import sys
 import time
 
 from i2c import htu21d
 from i2c import sgp30
-from i2c import ccs811
-from i2c import bme680
+#from i2c import ccs811
+from i2c import k30
+#from i2c import bme680
 
 
 #-----------------------------------------------------------------------------
@@ -28,25 +31,27 @@ comp_counter = COMP_COUNTS
 
 
 SGP30 = sgp30.SGP30("SGP30", 0x58)
-SGP30.set_comp( 23, 30 )    # test values
 HTU21D = htu21d.HTU21D("HTU21D", 0x40)
-CCS811 = ccs811.CCS811("CCS811", 0x5a)
-
-BME680 = bme680.BME680("BME680", 0x77)
+#CCS811 = ccs811.CCS811("CCS811", 0x5a)
+K30 = k30.K30("K30", 0x68)
+#BME680 = bme680.BME680("BME680", 0x77)
 
 while True:
-    
+
     Tbegin = time.time()
     comp_counter -= 1
-        
+
     if (comp_counter % SLOW_COUNTS == 0 ):
         # Tasks to be run once every 20 seconds
 
-        tmp = HTU21D.task()
-        print "HTU21D: %3.1f %3.1f" % ( tmp[0], tmp[1] )
+        co2 = K30.task()
+        print("K30: %d") % co2
 
-        voc = CCS811.task()
-        print "CCS811: %.0f" % voc
+        tmp = HTU21D.task()
+        print("HTU21D: %3.1f %3.1f") % ( tmp[0], tmp[1] )
+
+        #voc = CCS811.task()
+        #print "CCS811: %.0f" % voc
 
         SGP30.get_baseline()
 
@@ -54,15 +59,15 @@ while True:
         comp_counter = COMP_COUNTS
         # Tasks to be run once every minute
 
-        CCS811.comp_task()
+        #CCS811.comp_task()
         SGP30.comp_task()
 
     # Tasks to be run every second
     voc = SGP30.task()
     print("SGP30: %.0f") % voc
-    if BME680.task() and BME680.data.heat_stable:
-       output = "{0:.2f}, {1:.2f}, {2:.2f}, {3:d}".format(BME680.data.temperature, BME680.data.pressure, BME680.data.humidity, BME680.data.gas_resistance)
-       print output 
+	##    if BME680.task() and BME680.data.heat_stable:
+	##       output = "{0:.2f}, {1:.2f}, {2:.2f}, {3:d}".format(BME680.data.temperature, ##BME680.data.pressure, BME680.data.humidity, BME680.data.gas_resistance)
+	##       print output 
 
 
     # 1 second time keeper
