@@ -2,6 +2,8 @@
 #
 # chris@crHARPER.com
 # JAN 29, 2018
+# Revised:
+# OCT 18, 2021
 #
 # Measurment Specialties HTU21D Temperature/Humidity sensor
 # Raspberry Pi
@@ -10,7 +12,8 @@
 #
 import os
 import time
-from smbus import SMBus
+#from smbus import SMBus
+from smbus2 import SMBus,i2c_msg
 from math import log10
 
 I2CBUS = 1
@@ -68,10 +71,15 @@ class HTU21D:
 
         self.init_buff = 1 # flag to fill buffers
         
-        bus = SMBus(I2CBUS)
-        bus.write_byte( self.I2Caddr, HTU21D_SOFT_RESET )
-        time.sleep(0.015)        
-        bus.close()
+        try:
+            bus = SMBus(I2CBUS)
+            bus.write_byte( self.I2Caddr, HTU21D_SOFT_RESET )
+            time.sleep(0.05)        
+            bus.close()
+            
+        except:
+            bus.close()
+            print "htu21d.init() failed"
     
     
     #-----------------------------------------------------------------------------
@@ -95,7 +103,7 @@ class HTU21D:
         #print "htu21d.crc8() crc: 0x%02x" % crc        
         
         return crc
-        
+       
         
     #-----------------------------------------------------------------------------
     # HTU21D Task
@@ -110,9 +118,13 @@ class HTU21D:
         status = 0
         
         try:
-
             bus = SMBus(I2CBUS)
-            resp = bus.read_i2c_block_data( self.I2Caddr, HTU21D_READ_TEMP_HOLD, 3 )
+            bus.write_byte( self.I2Caddr, HTU21D_READ_TEMP_NOHOLD )
+            time.sleep(0.05)
+            read = i2c_msg.read( self.I2Caddr, 3 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
+
             if ( self.crc8(resp) == 0 ):
                 status += 1
                 # data sheet 15/21 Temperature Conversion
@@ -139,9 +151,14 @@ class HTU21D:
                 f = open(self.FptrTC,"w")
                 f.write("%3.1f" % avg_temp)
                 f.close()
-
-            resp = bus.read_i2c_block_data( self.I2Caddr, HTU21D_READ_HUM_HOLD, 3 )
+                
+            bus.write_byte( self.I2Caddr, HTU21D_READ_HUM_NOHOLD )
+            time.sleep(0.05)
+            read = i2c_msg.read( self.I2Caddr, 3 )
+            bus.i2c_rdwr(read)
+            resp = list(read)
             bus.close()
+
             if( self.crc8( resp ) == 0 ):
                 status += 1
                 # data sheet 15/21 Relative Humidity
@@ -156,7 +173,8 @@ class HTU21D:
                     humid = 100.0
                 
                 # RH compensation per datasheet page: 4/12    
-                rh = humid + ( 25.0 - temp) * -0.15    
+                # JUN 28, 2018 changed to avg_temp
+                rh = humid + ( 25.0 - avg_temp) * -0.15    
 
                 self.humid_buff[self.humid_ptr] = rh
                 self.humid_ptr += 1
@@ -180,7 +198,7 @@ class HTU21D:
     
             # with both valid temperature and RH 
             # calculate the dew point and absolute humidity using average values
-            if status == 2:
+            if status > 1:
             
                 # Calculate dew point
             
@@ -209,10 +227,11 @@ class HTU21D:
                 f.write("%3.1f" % ah)
                 f.close()
 
-            print "htu21d.task() T: %3.1f RH: %3.1f Tdew: %3.1f AH: %3.1f" %  ( avg_temp, avg_humid, tdew, ah )
+            #print "htu21d.task() T: %3.1f RH: %3.1f Tdew: %3.1f AH: %3.1f" %  ( avg_temp, avg_humid, tdew, ah )
         
         except:
-            print "htu21d.task() error"
+            bus.close()
+            print "htu21d.task() failed"
             
         # returning average values
-        return [ temp, humid, tdew, ah ]        
+        return [ temp, humid, tdew ]        
