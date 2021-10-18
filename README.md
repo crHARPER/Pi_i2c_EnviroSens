@@ -3,6 +3,8 @@ Python I2C Multiple Environmental Sensor Management for Raspberry Pi
 
 chris@crHARPER.com
 DEC 23, 2018
+Revised:
+OCT 18, 2021
 
 The purpose of this project is to allow basically any version of the Raspberry Pi to gather data from a number of i2c environmental sensors and to make that data available for other processes running asynchronously on the Pi for data logging and/or data transfer via MQTT or other preferred method.
 
@@ -17,8 +19,11 @@ When i2c sensors are initialized they are added to the RAM file system in /tmp.
 i2s sensors included/supported are:
 1) HTU21D Temperature Humidity sensor
 2) SGP30 VOC Sensor
-3) CCS811 VOC Sensor
-4) BME860 VOC Pressure Temperature Humidity Sensor
+3) CCS811 VOC Sensor ***
+4) BME860 VOC Pressure Temperature Humidity Sensor ***
+5) K30 CO2 Sensor
+
+*** 10/18/21 Not updated to work with SMBus2 library.  For VOCs the CCS811 and BME860 have not been very reliable.  The SPG30 family has been working well.
 
 The CCS811 grabs Temperature & Humidity values from the HTU21D via the file system.
 The SGP30 grabs the Absolute Humidity value from the HTU21D via the file system as well.
@@ -28,13 +33,6 @@ Sensor data is maintained typically in one minute moving averages, updated three
 
 adaFruit has made mention that the CCS811 is not comparable with the Raspberry Pi's i2c hardware but I have been getting reliable operation by slowing down the Pi's i2c baud rate.  To do this, the following lines needs to be added to the end of the /boot/config.txt file:
 
-	dtoverlay=i2c-bcm2708
+	dtoverlay=i2c-bcm2708 (for PiZero-W)
 	dtparam=i2c1_baudrate=20000     
-
-
-
-
-
-
-
 
