@@ -7,7 +7,7 @@
 # DEC 03, 2018 Added Serial ID and now writing Version to file system
 #
 # Revised:
-# OCT 18, 2021
+# OCT 19, 2021
 #
 # Sensirion SGP30 VOC sensor
 # running on a Raspberry Pi
@@ -149,36 +149,35 @@ class SGP30:
     # usually called by comp_task() and __init__()
     def set_comp( self, ah ):
         
-        try:
+        msg = [ SGP30_SET_AH ] # start with command LSB
 
-            msg = [ SGP30_SET_AH ] # start with command LSB
-
-            # we don't want to completely turn off compensation when humididty is very low
-            # per datasheet page 8/15 minimum value is 1/256 g/M^3
-            #if ah < 0.1:
-            #    ah = 0.01
+        # we don't want to completely turn off compensation when humididty is very low
+        # per datasheet page 8/15 minimum value is 1/256 g/M^3
+        #if ah < 0.1:
+        #    ah = 0.01
         
-            # Enviro's very low winter time AH values may be causing large baseline offsets
-            # testing limiting minimum AH value to 1g/M^3
-            if ah < 1.0: 
-                ah = 1.0
+        # Enviro's very low winter time AH values may be causing large baseline offsets
+        # testing limiting minimum AH value to 1g/M^3
+        if ah < 1.0: 
+            ah = 1.0
 
-            ah_i = int( ah // 1) 	        # integer byte
-            ah_i &= 0xff
-            ah_d = int( (ah % 1) * 256.0 ) # decimal byte
-            ah_d &= 0xff   
+        ah_i = int( ah // 1) 	        # integer byte
+        ah_i &= 0xff
+        ah_d = int( (ah % 1) * 256.0 ) # decimal byte
+        ah_d &= 0xff   
 
-            ah_comp = [ ah_i, ah_d ]       # in SGP30 format
-            ah_crc = self.crc8( ah_comp )
+        ah_comp = [ ah_i, ah_d ]       # in SGP30 format
+        ah_crc = self.crc8( ah_comp )
 
-            # addend crc byte
-            ah_comp.append( ah_crc )
-            # add AH data list to message list
-            msg.extend(ah_comp)
+        # addend crc byte
+        ah_comp.append( ah_crc )
+        # add AH data list to message list
+        msg.extend(ah_comp)
 
-            print "sgp30.set_comp(): set AH: %.1f" % ( ah )
-            print "sgp30.set_comp(): AH regs. 0x%02x 0x%02x" % ( ah_i, ah_d )
+        print "sgp30.set_comp(): set AH: %.1f" % ( ah )
+        print "sgp30.set_comp(): AH regs. 0x%02x 0x%02x" % ( ah_i, ah_d )
 
+        try:
             bus = SMBus(I2CBUS)
             resp = bus.write_i2c_block_data( self.I2Caddr, SGP30_MSB, msg )
             bus.close()
@@ -199,7 +198,6 @@ class SGP30:
     #----------------------------------------------------------------------------- 
     # run task once a minute
     def comp_task(self):
-        
         # Try to read the externally expected temperature and humidity files
         try:
             file = open( self.FptrHTU21D_AH, "r")
@@ -230,7 +228,6 @@ class SGP30:
     # Get internal auto calibration and write to file system 
     #-----------------------------------------------------------------------------        
     def get_baseline(self):
-        
         try:
             # eCO2 baseline word first + crc
             # tVOC baseline word second + crc       
@@ -283,8 +280,6 @@ class SGP30:
     #----------------------------------------------------------------------------- 
     # !!This Method Has Not Been Verified!!     
     def set_baseline( self, baseline_voc, baseline_co2 ):
-        
-        
         # tVOC baseline word first + crc
         # eCO2 baseline word second + crc
         baseline = [0x00] * 2
@@ -323,9 +318,7 @@ class SGP30:
     # Get feature set & version 
     #-----------------------------------------------------------------------------        
     def get_version(self):
-        
         info = 99999
-        
         try:
             bus = SMBus(I2CBUS)
             bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_GET_VERSION )
@@ -357,18 +350,14 @@ class SGP30:
     # Get Serial ID
     #-----------------------------------------------------------------------------
     def get_sid(self):
-        
         sid = 99999
-        
         try:
-            
             info = [ 0xffff ] * 3
             test = 0
     
             bus = SMBus(I2CBUS)
             bus.write_byte_data( self.I2Caddr, SGP30_SID_MSB, SGP30_SID_LSB )
             time.sleep(0.01)
-        
             #resp = bus.read_i2c_block_data( self.I2Caddr, 0, 9 )
             read = i2c_msg.read( self.I2Caddr, 9 )
             bus.i2c_rdwr(read)
@@ -414,19 +403,17 @@ class SGP30:
     #-----------------------------------------------------------------------------
     # should be run once per second if used
     def raw(self):
-    
         h2 = 99999 # Hydrogen
         et = 99999 # Ethanol
         test = 0
-        
         try:
-        
             bus = SMBus(I2CBUS)
             bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_MEASURE_RAW )
             time.sleep(0.03)
-            read = i2c_msg.read( self.I2Caddr, 6 )
-            bus.i2c_rdwr(read)
-            resp = list(read)
+            resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
+            #read = i2c_msg.read( self.I2Caddr, 6 )
+            #bus.i2c_rdwr(read)
+            #resp = list(read)
             bus.close()
         
             # raw sensor values
@@ -490,17 +477,15 @@ class SGP30:
     #-----------------------------------------------------------------------------
     # should be run once per second
     def task(self):
-    
-        tvoc = 99999
-        
+        t_voc = 99999
         try:
             bus = SMBus(I2CBUS)
             bus.write_byte_data( self.I2Caddr, SGP30_MSB, SGP30_MEASURE )
             time.sleep(0.02)
-            #resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
-            read = i2c_msg.read( self.I2Caddr, 6 )
-            bus.i2c_rdwr(read)
-            resp = list(read)
+            resp = bus.read_i2c_block_data( self.I2Caddr, 0, 6 )
+            #read = i2c_msg.read( self.I2Caddr, 6 )
+            #bus.i2c_rdwr(read)
+            #resp = list(read)
 
             bus.close()
             # Only care about tVOC since eCO2 is just that
